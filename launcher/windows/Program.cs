@@ -16,7 +16,7 @@ internal static class Program
     {
         if (args.Contains("--self-test"))
         {
-            try { SmokeTest.Run().GetAwaiter().GetResult(); Environment.ExitCode = 0; }
+            try { ApplicationConfiguration.Initialize(); LayoutSmokeTest.Run(); SmokeTest.Run().GetAwaiter().GetResult(); Environment.ExitCode = 0; }
             catch (Exception ex) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "manager-test-result.txt"), ex.ToString()); Environment.ExitCode = 1; }
             return;
         }
@@ -169,27 +169,31 @@ internal sealed class ManagerForm : Form
         tunnel = new("tunnel", "Dot Tunnel");
         tunnelRuntime = new(dotDirectory);
         services = dotOnly ? [snow, bridge, dot, tunnel] : [snow, dsh, bridge, dot, tunnel];
-        Text = "GPTBot 管理器"; Size = new Size(1100, 920); MinimumSize = new Size(960, 800);
+        SuspendLayout();
+        // All sizes below are authored at 96 DPI; scale the complete control tree together.
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Text = "GPTBot 管理器"; ClientSize = new Size(1000, 680); MinimumSize = new Size(800, 480);
         StartPosition = FormStartPosition.CenterScreen; Font = new Font("Microsoft YaHei UI", 10);
         BackColor = Color.FromArgb(243, 246, 251);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 6 };
-        layout.RowStyles.Add(new(SizeType.Absolute, 63)); layout.RowStyles.Add(new(SizeType.Absolute, 48));
-        layout.RowStyles.Add(new(SizeType.Absolute, dotOnly ? 310 : 365)); layout.RowStyles.Add(new(SizeType.Absolute, 48));
-        layout.RowStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.Absolute, 35));
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(12), ColumnCount = 1, RowCount = 5 };
+        layout.ColumnStyles.Add(new(SizeType.Percent, 100));
+        layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.AutoSize));
+        layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
+        layout.RowStyles.Add(new(SizeType.AutoSize));
         Controls.Add(layout);
-        layout.Controls.Add(new Label { Text = "GPTBot  /  运行管理", Font = new Font(Font.FontFamily, 23, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(27, 46, 76) });
-        var tools = new FlowLayoutPanel { Dock = DockStyle.Fill };
+        var tools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+        tools.Controls.Add(new Label { Text = "GPTBot  /  运行管理", Font = new Font(Font.FontFamily, 16, FontStyle.Bold), AutoSize = true, ForeColor = Color.FromArgb(27, 46, 76), Margin = new Padding(3, 0, 16, 0) });
         var all = MakeButton("一键启动", async () => await StartAll());
         var stopAll = MakeButton("全部停止", async () => { batch?.Cancel(); await StopAll(); });
         tools.Controls.AddRange([all, stopAll, autoRestart]);
         tools.Controls.Add(MakeButton("隧道密钥", () => { if (tunnelRuntime.RequestKey(this)) tunnel.Log("已设置隧道密钥（仅当前管理器内存）；下次连接或重连时使用。"); return Task.CompletedTask; }));
         layout.Controls.Add(tools);
-        var rows = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = services.Length, BackColor = Color.White, Padding = new Padding(12) };
-        rows.ColumnStyles.Add(new(SizeType.Absolute, 145)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
-        for (int i = 0; i < 3; i++) rows.ColumnStyles.Add(new(SizeType.Absolute, 95));
-        rows.ColumnStyles.Add(new(SizeType.Absolute, 110));
+        var rows = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 6, RowCount = services.Length, BackColor = Color.White, Padding = new Padding(8) };
+        rows.ColumnStyles.Add(new(SizeType.AutoSize)); rows.ColumnStyles.Add(new(SizeType.Percent, 100));
+        for (int i = 0; i < 4; i++) rows.ColumnStyles.Add(new(SizeType.AutoSize));
         for (int i = 0; i < services.Length; i++) {
-            var svc = services[i]; rows.RowStyles.Add(new(SizeType.Percent, 100f / services.Length));
+            var svc = services[i]; rows.RowStyles.Add(new(SizeType.AutoSize));
             rows.Controls.Add(new Label { Text = svc.Name, AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font(Font, FontStyle.Bold) }, 0, i);
             svc.Status = new Label { AutoSize = true, Anchor = AnchorStyles.Left }; rows.Controls.Add(svc.Status, 1, i);
             svc.Start = MakeButton("启动", async () => await StartService(svc));
@@ -200,18 +204,18 @@ internal sealed class ManagerForm : Form
                 try { await OpenBackend(svc); }
                 catch (Exception e) { svc.Log("打开管理后台失败：" + e.Message); }
             });
-            backend.Width = 100;
             rows.Controls.Add(backend, 5, i);
         }
         layout.Controls.Add(rows);
-        var logTools = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) };
+        var logTools = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         filter.Items.Add("全部日志"); filter.Items.AddRange(services.Select(s => (object)s.Name).ToArray()); filter.SelectedIndex = 0;
         filter.SelectedIndexChanged += (_, _) => RepaintLog();
         logTools.Controls.Add(filter);
         logTools.Controls.Add(MakeButton("清空显示", () => { foreach (var s in services) s.History.Clear(); log.Clear(); return Task.CompletedTask; }));
         logTools.Controls.Add(MakeButton("打开日志目录", () => { Process.Start(new ProcessStartInfo("explorer.exe", Quote(Path.Combine(root, "state"))) { UseShellExecute = true }); return Task.CompletedTask; }));
         layout.Controls.Add(logTools); layout.Controls.Add(log);
-        layout.Controls.Add(new Label { Text = "关闭程序会停止由本程序启动的服务。外部实例仅显示状态；启动失败原因见下方日志。", AutoSize = true, ForeColor = Color.DimGray, Padding = new Padding(0, 8, 0, 0) });
+        layout.Controls.Add(new Label { Text = "关闭程序会停止由本程序启动的服务。外部实例仅显示状态；启动失败原因见下方日志。", AutoSize = true, ForeColor = Color.DimGray });
+        ResumeLayout(true);
         snow.Log("使用目录：" + snowDir);
         if (!dotOnly) dsh.Log("使用启动器：" + dshCli);
         else bridge.Log("全部白名单会话使用 Dot 后端；DSH 已从启动流程撤下。");
@@ -219,6 +223,29 @@ internal sealed class ManagerForm : Form
         tunnel.Log("由管理器直接运行官方 tunnel-client；密钥仅存内存。关闭管理器也会停止隧道。");
         FormClosing += OnClosing;
         timer.Tick += async (_, _) => await Tick(); timer.Start();
+    }
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        FitToWorkingArea(Screen.FromControl(this).WorkingArea);
+    }
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        if (!e.Cancel) FitToWorkingArea(Screen.FromControl(this).WorkingArea);
+    }
+    protected override void OnResizeEnd(EventArgs e)
+    {
+        base.OnResizeEnd(e);
+        FitToWorkingArea(Screen.FromControl(this).WorkingArea);
+    }
+    internal void FitToWorkingArea(Rectangle area)
+    {
+        var minimum = LogicalToDeviceUnits(new Size(800, 480));
+        MinimumSize = new Size(Math.Min(minimum.Width, area.Width), Math.Min(minimum.Height, area.Height));
+        if (WindowState != FormWindowState.Normal) return;
+        Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+        Location = new Point(Math.Clamp(Left, area.Left, area.Right - Width), Math.Clamp(Top, area.Top, area.Bottom - Height));
     }
     static string FindRoot()
     {
@@ -253,7 +280,7 @@ internal sealed class ManagerForm : Form
     static string Quote(string value) => "\"" + value.Replace("\"", "") + "\"";
     Button MakeButton(string text, Func<Task> action)
     {
-        var b = new Button { Text = text, Size = new Size(text.Length > 5 ? 135 : 88, 33), FlatStyle = FlatStyle.Flat, BackColor = Color.White, Margin = new Padding(3, 3, 7, 3), Anchor = AnchorStyles.Left };
+        var b = new Button { Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(60, 28), Padding = new Padding(6, 0, 6, 0), FlatStyle = FlatStyle.Flat, BackColor = Color.White, Margin = new Padding(3, 2, 3, 2), Anchor = AnchorStyles.Left };
         b.Click += async (_, _) => { b.Enabled = false; try { await action(); } catch (Exception e) { bridge.Log("操作失败：" + e.Message); } finally { if (!closing) b.Enabled = true; } };
         return b;
     }
@@ -506,7 +533,7 @@ internal static class SmokeTest
             try { using var p = Process.GetProcessById(descendant); if (!p.HasExited) throw new Exception("Descendant survived stop"); } catch (ArgumentException) { }
             using var exited = new ManagedProcess("node.exe", "-e \"process.exit(7)\"", dir, lines.Enqueue);
             await exited.Process.WaitForExitAsync(); if (exited.Process.ExitCode != 7) throw new Exception("Exit code lost");
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "manager-test-result.txt"), "PASS: hidden process startup, UTF-8 stdout/stderr, exit codes, stop and descendant cleanup; tunnel readiness, stale health, secret environment isolation and log redaction.");
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "manager-test-result.txt"), "PASS: responsive manager layout (80 work-area/size cases at the process DPI); hidden process startup, UTF-8 stdout/stderr, exit codes, stop and descendant cleanup; tunnel readiness, stale health, secret environment isolation and log redaction.");
         } finally { Directory.Delete(dir, true); }
     }
 }
